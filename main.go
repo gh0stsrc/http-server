@@ -5,21 +5,21 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
-func getLinesChannel(f io.ReadCloser) <-chan string {
+func getLinesChannel(rc io.ReadCloser) <-chan string {
 	ch := make(chan string)
 	buffer := bytes.NewBuffer(make([]byte, 0, 8))
 	var currentLine string
 
 	go func() {
 		defer close(ch)
-		defer f.Close()
+		defer rc.Close()
 		for {
-			_, err := io.CopyN(buffer, f, 8)
+			_, err := io.CopyN(buffer, rc, 8)
 			currentLine = currentLine + buffer.String()
 			parts := strings.Split(currentLine, "\n")
 			buffer.Reset()
@@ -45,27 +45,30 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 
 func main() {
 
-	workingDir, err := os.Getwd()
+	l, err := net.Listen("tcp", "127.0.0.1:42069")
 	if err != nil {
-		slog.Error("get working dir", "error", err)
+		slog.Error("listener setup", "error", err)
 		os.Exit(1)
 	}
-	f, err := os.Open(filepath.Join(workingDir, "messages.txt"))
-	if err != nil {
-		slog.Error("opening file", "error", err)
-		os.Exit(1)
-	}
-	defer f.Close()
-
-	ch := getLinesChannel(f)
+	defer l.Close()
 
 	for {
-		line, ok := <-ch
-		if !ok {
-			ch = nil
-			break
+		connection, err := l.Accept()
+		if err != nil {
+			slog.Error("connection", "error", err)
 		}
-		fmt.Printf("read: %s\n", line)
+		slog.Info("connection established", "address", connection.LocalAddr().String())
+		ch := getLinesChannel(connection)
+
+		for {
+			line, ok := <-ch
+			if !ok {
+				ch = nil
+				break
+			}
+			fmt.Printf("read: %s\n", line)
+		}
+
 	}
 
 }
